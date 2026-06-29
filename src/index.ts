@@ -16,6 +16,35 @@ app.use(
 	}),
 )
 
+/* ---- Logging ---- */
+app.use('*', async (c, next) => {
+	const start = Date.now()
+	await next()
+	const ms = Date.now() - start
+	console.log(`${c.req.method} ${c.req.path} → ${c.res.status} (${ms}ms)`)
+})
+
+/* ---- Rate limiter ---- */
+const rateMap = new Map<string, { count: number; resetAt: number }>()
+
+function rateLimit(limit: number, windowMs: number) {
+	return async (c: any, next: any) => {
+		const ip = c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || 'unknown'
+		const now = Date.now()
+		const entry = rateMap.get(ip)
+		if (!entry || now > entry.resetAt) {
+			rateMap.set(ip, { count: 1, resetAt: now + windowMs })
+			await next()
+			return
+		}
+		entry.count++
+		if (entry.count > limit) {
+			return c.json({ error: 'Juda ko‘p so‘rov. Birozdan so‘ng urinib ko‘ring.' }, 429)
+		}
+		await next()
+	}
+}
+
 async function authMiddleware(c: any, next: any) {
 	const auth = c.req.header('Authorization')
 	if (!auth?.startsWith('Bearer ')) return c.json({ error: 'Avtorizatsiya talab qilinadi' }, 401)
@@ -52,15 +81,16 @@ function validate(fields: Record<string, unknown>, rules: Record<string, string>
 	return errors
 }
 
+/* ---- Products ---- */
 async function listProducts(c: any) {
-	const { data, error } = await 	supabaseAdmin.from('products').select('*')
+	const { data, error } = await supabaseAdmin.from('products').select('*')
 	if (error) return c.json({ error: error.message }, 500)
 	return c.json(data)
 }
 
 async function getProduct(c: any) {
 	const id = c.req.param('id')
-	const { data, error } = await 	supabaseAdmin.from('products').select('*').eq('id', id).single()
+	const { data, error } = await supabaseAdmin.from('products').select('*').eq('id', id).single()
 	if (error) return c.json({ error: error.message }, 500)
 	return c.json(data)
 }
@@ -70,7 +100,7 @@ async function createProduct(c: any) {
 	const errors = validate(body, { title: 'required', price: 'number' })
 	if (errors.length) return c.json({ error: errors.join('; ') }, 400)
 
-	const { data, error } = await 	supabaseAdmin.from('products').insert({
+	const { data, error } = await supabaseAdmin.from('products').insert({
 		title: body.title,
 		description: body.description,
 		price: body.price,
@@ -86,7 +116,7 @@ async function updateProduct(c: any) {
 	const errors = validate(body, { title: 'required', price: 'number' })
 	if (errors.length) return c.json({ error: errors.join('; ') }, 400)
 
-	const { data, error } = await 	supabaseAdmin.from('products').update({
+	const { data, error } = await supabaseAdmin.from('products').update({
 		title: body.title,
 		description: body.description,
 		price: body.price,
@@ -98,30 +128,27 @@ async function updateProduct(c: any) {
 
 async function deleteProduct(c: any) {
 	const id = c.req.param('id')
-	const { data, error } = await 	supabaseAdmin.from('products').delete().eq('id', id).select()
+	const { error } = await supabaseAdmin.from('products').delete().eq('id', id)
 	if (error) return c.json({ error: error.message }, 500)
-	return c.json(data)
+	return c.json({ success: true })
 }
 
 app.get('/products', listProducts)
 app.get('/products/:id', getProduct)
-app.get('/product/:id', getProduct)
 app.post('/products', authMiddleware, createProduct)
-app.post('/product', authMiddleware, createProduct)
 app.put('/products/:id', authMiddleware, updateProduct)
-app.put('/product/:id', authMiddleware, updateProduct)
 app.delete('/products/:id', authMiddleware, deleteProduct)
-app.delete('/product/:id', authMiddleware, deleteProduct)
 
+/* ---- Orders ---- */
 async function listOrders(c: any) {
-	const { data, error } = await 	supabaseAdmin.from('orders').select('*').order('created_at', { ascending: false })
+	const { data, error } = await supabaseAdmin.from('orders').select('*').order('created_at', { ascending: false })
 	if (error) return c.json({ error: error.message }, 500)
 	return c.json(data)
 }
 
 async function getOrder(c: any) {
 	const id = c.req.param('id')
-	const { data, error } = await 	supabaseAdmin.from('orders').select('*').eq('id', id).single()
+	const { data, error } = await supabaseAdmin.from('orders').select('*').eq('id', id).single()
 	if (error) return c.json({ error: error.message }, 500)
 	return c.json(data)
 }
@@ -129,7 +156,7 @@ async function getOrder(c: any) {
 async function updateOrder(c: any) {
 	const id = c.req.param('id')
 	const body = await c.req.json()
-	const { data, error } = await 	supabaseAdmin.from('orders').update({
+	const { data, error } = await supabaseAdmin.from('orders').update({
 		status: body.status,
 		phone: body.phone,
 		address: body.address,
@@ -141,16 +168,16 @@ async function updateOrder(c: any) {
 async function patchOrderStatus(c: any) {
 	const id = c.req.param('id')
 	const { status } = await c.req.json()
-	const { data, error } = await 	supabaseAdmin.from('orders').update({ status }).eq('id', id).select()
+	const { data, error } = await supabaseAdmin.from('orders').update({ status }).eq('id', id).select()
 	if (error) return c.json({ error: error.message }, 500)
 	return c.json(data)
 }
 
 async function deleteOrder(c: any) {
 	const id = c.req.param('id')
-	const { data, error } = await 	supabaseAdmin.from('orders').delete().eq('id', id).select()
+	const { error } = await supabaseAdmin.from('orders').delete().eq('id', id)
 	if (error) return c.json({ error: error.message }, 500)
-	return c.json(data)
+	return c.json({ success: true })
 }
 
 async function createOrder(c: any) {
@@ -164,7 +191,7 @@ async function createOrder(c: any) {
 	})
 	if (errors.length) return c.json({ error: errors.join('; ') }, 400)
 
-	const { error } = await 	supabaseAdmin.from('orders').insert({
+	const { error } = await supabaseAdmin.from('orders').insert({
 		product_id: body.product_id,
 		product_title: body.product_title,
 		product_image: body.product_image,
@@ -176,7 +203,8 @@ async function createOrder(c: any) {
 	})
 	if (error) return c.json({ error: error.message }, 500)
 
-	const message = `
+	try {
+		await sendTelegramMessage(`
 NEW ORDER
 
 Product: ${body.product_title}
@@ -185,8 +213,10 @@ Price: ${body.price} UZS
 Name: ${body.customer_name}
 Phone: ${body.phone}
 Address: ${body.address}
-`
-	await sendTelegramMessage(message)
+`)
+	} catch (err) {
+		console.error('TELEGRAM ERROR:', err)
+	}
 
 	return c.json({ success: true })
 }
@@ -196,8 +226,7 @@ app.get('/orders/:id', authMiddleware, getOrder)
 app.put('/orders/:id', authMiddleware, updateOrder)
 app.patch('/orders/:id/status', authMiddleware, patchOrderStatus)
 app.delete('/orders/:id', authMiddleware, deleteOrder)
-app.post('/order', createOrder)
-app.post('/orders', createOrder)
+app.post('/order', rateLimit(5, 60_000), createOrder)
 
 serve({
 	fetch: app.fetch,

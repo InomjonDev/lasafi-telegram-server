@@ -14,6 +14,36 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
 
+/* ---- Logging ---- */
+app.use('*', async (c, next) => {
+  const start = Date.now()
+  await next()
+  const ms = Date.now() - start
+  console.log(`${c.req.method} ${c.req.path} → ${c.res.status} (${ms}ms)`)
+})
+
+/* ---- Rate limiter (simple in-memory) ---- */
+const rateMap = new Map<string, { count: number; resetAt: number }>()
+
+function rateLimit(limit: number, windowMs: number) {
+  return async (c: any, next: any) => {
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
+    const now = Date.now()
+    const entry = rateMap.get(ip)
+    if (!entry || now > entry.resetAt) {
+      rateMap.set(ip, { count: 1, resetAt: now + windowMs })
+      await next()
+      return
+    }
+    entry.count++
+    if (entry.count > limit) {
+      return c.json({ error: 'Juda ko‘p so‘rov. Birozdan so‘ng urinib ko‘ring.' }, 429)
+    }
+    await next()
+  }
+}
+
+/* ---- Auth ---- */
 async function authMiddleware(c: any, next: any) {
   const auth = c.req.header('Authorization')
   if (!auth?.startsWith('Bearer ')) return c.json({ error: 'Avtorizatsiya talab qilinadi' }, 401)
@@ -55,6 +85,7 @@ function db(c: any) {
   return createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY)
 }
 
+/* ---- Products ---- */
 async function listProducts(c: any) {
   const { data, error } = await db(c).from('products').select('*')
   if (error) return c.json({ error: error.message }, 500)
@@ -93,7 +124,7 @@ async function updateProduct(c: any) {
     title: body.title,
     description: body.description,
     price: body.price,
-    image: body.image,
+    images: body.images,
   }).eq('id', id).select()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
@@ -108,14 +139,11 @@ async function deleteProduct(c: any) {
 
 app.get('/products', listProducts)
 app.get('/products/:id', getProduct)
-app.get('/product/:id', getProduct)
 app.post('/products', authMiddleware, createProduct)
-app.post('/product', authMiddleware, createProduct)
 app.put('/products/:id', authMiddleware, updateProduct)
-app.put('/product/:id', authMiddleware, updateProduct)
 app.delete('/products/:id', authMiddleware, deleteProduct)
-app.delete('/product/:id', authMiddleware, deleteProduct)
 
+/* ---- Orders ---- */
 async function listOrders(c: any) {
   const { data, error } = await db(c).from('orders').select('*').order('created_at', { ascending: false })
   if (error) return c.json({ error: error.message }, 500)
@@ -198,7 +226,6 @@ app.get('/orders/:id', authMiddleware, getOrder)
 app.put('/orders/:id', authMiddleware, updateOrder)
 app.patch('/orders/:id/status', authMiddleware, patchOrderStatus)
 app.delete('/orders/:id', authMiddleware, deleteOrder)
-app.post('/order', createOrder)
-app.post('/orders', createOrder)
+app.post('/order', rateLimit(5, 60_000), createOrder)
 
 export default app
