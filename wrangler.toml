@@ -1,0 +1,7 @@
+name = "telegram-shop-api"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+
+[vars]
+SUPABASE_URL="https://egurmgptxxsdmjbduhst.supabase.co"
+SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVndXJtZ3B0eHhzZG1qYmR1aHN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMzMwOTgsImV4cCI6MjA5NTkwOTA5OH0.sidHQ8T93nhyCSeBtoUc4tm7T4_qXsJAzwDel0t3ypc"
