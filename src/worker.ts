@@ -12,8 +12,8 @@ type Bindings = {
   SUPABASE_URL: string
   SUPABASE_ANON_KEY: string
   SUPABASE_SERVICE_ROLE_KEY: string
-  BOT_TOKEN: string
-  SELLER_CHAT_ID: string
+  ADMIN_BOT_TOKEN: string
+  ADMIN_CHAT_ID: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -148,8 +148,8 @@ async function createOrder(c: Context) {
 
   try {
     await sendTelegramNotification(
-      c.env.BOT_TOKEN,
-      c.env.SELLER_CHAT_ID,
+      c.env.ADMIN_BOT_TOKEN,
+      c.env.ADMIN_CHAT_ID,
       body.product_title,
       body.price,
       body.customer_name,

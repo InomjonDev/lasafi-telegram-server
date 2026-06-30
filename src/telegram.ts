@@ -1,7 +1,7 @@
 import 'dotenv/config'
 
-const token = () => process.env.BOT_TOKEN
-const chatId = () => process.env.SELLER_CHAT_ID
+const token = () => process.env.ADMIN_BOT_TOKEN
+const chatId = () => process.env.ADMIN_CHAT_ID
 
 export async function sendTelegramMessage(text: string): Promise<{ success: boolean; error?: string }> {
 	const res = await fetch(`https://api.telegram.org/bot${token()}/sendMessage`, {
