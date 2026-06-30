@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { Context } from 'hono'
+import { validate } from './shared/validate.js'
+import { rateLimit } from './shared/rateLimit.js'
+import { authMiddleware } from './shared/authMiddleware.js'
+import { computeAnalyticsStats } from './shared/analytics.js'
+import { sendTelegramNotification } from './shared/telegramNotify.js'
 
 type Bindings = {
   SUPABASE_URL: string
@@ -14,7 +20,6 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
 
-/* ---- Logging ---- */
 app.use('*', async (c, next) => {
   const start = Date.now()
   await next()
@@ -22,84 +27,27 @@ app.use('*', async (c, next) => {
   console.log(`${c.req.method} ${c.req.path} → ${c.res.status} (${ms}ms)`)
 })
 
-/* ---- Rate limiter (simple in-memory) ---- */
-const rateMap = new Map<string, { count: number; resetAt: number }>()
-
-function rateLimit(limit: number, windowMs: number) {
-  return async (c: any, next: any) => {
-    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown'
-    const now = Date.now()
-    const entry = rateMap.get(ip)
-    if (!entry || now > entry.resetAt) {
-      rateMap.set(ip, { count: 1, resetAt: now + windowMs })
-      await next()
-      return
-    }
-    entry.count++
-    if (entry.count > limit) {
-      return c.json({ error: 'Juda ko‘p so‘rov. Birozdan so‘ng urinib ko‘ring.' }, 429)
-    }
-    await next()
-  }
-}
-
-/* ---- Auth ---- */
-async function authMiddleware(c: any, next: any) {
-  const auth = c.req.header('Authorization')
-  if (!auth?.startsWith('Bearer ')) return c.json({ error: 'Avtorizatsiya talab qilinadi' }, 401)
-  const token = auth.slice(7)
-  const supabaseAdmin = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY)
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
-  if (error || !user) return c.json({ error: "Noto'g'ri token" }, 401)
-  await next()
-}
-
-const fieldLabels: Record<string, string> = {
-  title: 'Nomi',
-  price: 'Narxi',
-  product_title: 'Mahsulot nomi',
-  customer_name: 'Mijoz ismi',
-  phone: 'Telefon',
-  address: 'Manzil',
-}
-
-function validate(fields: Record<string, unknown>, rules: Record<string, string>) {
-  const errors: string[] = []
-  for (const [key, type] of Object.entries(rules)) {
-    const val = fields[key]
-    const label = fieldLabels[key] || key
-    if (type === 'required' && (val === undefined || val === null || val === '')) {
-      errors.push(`${label} kiritilishi shart`)
-    }
-    if (type === 'number' && val !== undefined && val !== null && val !== '' && (typeof val !== 'number' || isNaN(val))) {
-      errors.push(`${label} son bo'lishi kerak`)
-    }
-    if (type === 'positive' && typeof val === 'number' && val <= 0) {
-      errors.push(`${label} musbat son bo'lishi kerak`)
-    }
-  }
-  return errors
-}
-
-function db(c: any) {
+function db(c: Context) {
   return createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY)
 }
 
+const requireAuth = authMiddleware((c: Context) => db(c))
+
 /* ---- Products ---- */
-async function listProducts(c: any) {
+async function listProducts(c: Context) {
   const { data, error } = await db(c).from('products').select('*')
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
 }
 
-async function getProduct(c: any) {
+async function getProduct(c: Context) {
   const id = c.req.param('id')
   const { data, error } = await db(c).from('products').select('*').eq('id', id).single()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
 }
 
-async function createProduct(c: any) {
+async function createProduct(c: Context) {
   const body = await c.req.json()
   const errors = validate(body, { title: 'required', price: 'number' })
   if (errors.length) return c.json({ error: errors.join('; ') }, 400)
@@ -114,7 +62,7 @@ async function createProduct(c: any) {
   return c.json(data)
 }
 
-async function updateProduct(c: any) {
+async function updateProduct(c: Context) {
   const id = c.req.param('id')
   const body = await c.req.json()
   const errors = validate(body, { title: 'required', price: 'number' })
@@ -130,7 +78,7 @@ async function updateProduct(c: any) {
   return c.json(data)
 }
 
-async function deleteProduct(c: any) {
+async function deleteProduct(c: Context) {
   const id = c.req.param('id')
   const { error } = await db(c).from('products').delete().eq('id', id)
   if (error) return c.json({ error: error.message }, 500)
@@ -139,25 +87,25 @@ async function deleteProduct(c: any) {
 
 app.get('/products', listProducts)
 app.get('/products/:id', getProduct)
-app.post('/products', authMiddleware, createProduct)
-app.put('/products/:id', authMiddleware, updateProduct)
-app.delete('/products/:id', authMiddleware, deleteProduct)
+app.post('/products', requireAuth, createProduct)
+app.put('/products/:id', requireAuth, updateProduct)
+app.delete('/products/:id', requireAuth, deleteProduct)
 
 /* ---- Orders ---- */
-async function listOrders(c: any) {
+async function listOrders(c: Context) {
   const { data, error } = await db(c).from('orders').select('*').order('created_at', { ascending: false })
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
 }
 
-async function getOrder(c: any) {
+async function getOrder(c: Context) {
   const id = c.req.param('id')
   const { data, error } = await db(c).from('orders').select('*').eq('id', id).single()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
 }
 
-async function updateOrder(c: any) {
+async function updateOrder(c: Context) {
   const id = c.req.param('id')
   const body = await c.req.json()
   const { data, error } = await db(c).from('orders').update({
@@ -169,7 +117,7 @@ async function updateOrder(c: any) {
   return c.json(data)
 }
 
-async function patchOrderStatus(c: any) {
+async function patchOrderStatus(c: Context) {
   const id = c.req.param('id')
   const { status } = await c.req.json()
   const { data, error } = await db(c).from('orders').update({ status }).eq('id', id).select()
@@ -177,14 +125,14 @@ async function patchOrderStatus(c: any) {
   return c.json(data)
 }
 
-async function deleteOrder(c: any) {
+async function deleteOrder(c: Context) {
   const id = c.req.param('id')
-  const { data, error } = await db(c).from('orders').delete().eq('id', id).select()
+  const { error } = await db(c).from('orders').delete().eq('id', id)
   if (error) return c.json({ error: error.message }, 500)
-  return c.json(data)
+  return c.json({ success: true })
 }
 
-async function createOrder(c: any) {
+async function createOrder(c: Context) {
   const body = await c.req.json()
   const errors = validate(body, {
     product_title: 'required',
@@ -199,21 +147,17 @@ async function createOrder(c: any) {
   if (error) return c.json({ error: error.message }, 500)
 
   try {
-    await fetch(`https://api.telegram.org/bot${c.env.BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: c.env.SELLER_CHAT_ID,
-        text: `
-NEW ORDER
-Product: ${body.product_title}
-Price: ${body.price} UZS
-Name: ${body.customer_name}
-Phone: ${body.phone}
-Address: ${body.address}
-`,
-      }),
-    })
+    await sendTelegramNotification(
+      c.env.BOT_TOKEN,
+      c.env.SELLER_CHAT_ID,
+      body.product_title,
+      body.price,
+      body.customer_name,
+      body.phone,
+      body.address,
+      body.quantity,
+      body.product_image,
+    )
   } catch (err) {
     console.error('TELEGRAM ERROR:', err)
   }
@@ -221,11 +165,56 @@ Address: ${body.address}
   return c.json({ success: true })
 }
 
-app.get('/orders', authMiddleware, listOrders)
-app.get('/orders/:id', authMiddleware, getOrder)
-app.put('/orders/:id', authMiddleware, updateOrder)
-app.patch('/orders/:id/status', authMiddleware, patchOrderStatus)
-app.delete('/orders/:id', authMiddleware, deleteOrder)
+app.get('/orders', requireAuth, listOrders)
+app.get('/orders/:id', requireAuth, getOrder)
+app.put('/orders/:id', requireAuth, updateOrder)
+app.patch('/orders/:id/status', requireAuth, patchOrderStatus)
+app.delete('/orders/:id', requireAuth, deleteOrder)
 app.post('/order', rateLimit(5, 60_000), createOrder)
+
+/* ---- Analytics ---- */
+async function trackEvent(c: Context) {
+  try {
+    const body = await c.req.json()
+    const { event_type, page, product_id, referrer, visitor_id } = body
+    if (!event_type) return c.json({ error: 'event_type is required' }, 400)
+
+    const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || null
+    const ua = c.req.header('user-agent') || null
+
+    await db(c).from('analytics_events').insert({
+      event_type, page, product_id, referrer, visitor_id,
+      user_agent: ua, ip_address: ip,
+    })
+  } catch (err) {
+    console.error('trackEvent error:', err)
+  }
+
+  return c.json({ success: true })
+}
+
+async function getAnalyticsStats(c: Context) {
+  try {
+    const from = c.req.query('from')
+    const to = c.req.query('to')
+
+    const { data: events, error } = await db(c)
+      .from('analytics_events')
+      .select('*')
+      .gte('created_at', from || '1970-01-01')
+      .lte('created_at', to || '2099-12-31')
+
+    if (error) throw error
+
+    const result = computeAnalyticsStats(events || [])
+    return c.json(result)
+  } catch (err) {
+    console.error('getAnalyticsStats error:', err)
+    return c.json({ error: "Ma'lumotlarni yuklashda xatolik yuz berdi" }, 500)
+  }
+}
+
+app.post('/analytics/track', rateLimit(200, 60_000), trackEvent)
+app.get('/analytics/stats', requireAuth, getAnalyticsStats)
 
 export default app
