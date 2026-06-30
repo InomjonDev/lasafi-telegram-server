@@ -54,6 +54,7 @@ async function createProduct(c: Context) {
     description: body.description,
     price: body.price,
     images: body.images,
+    quantity: body.quantity ?? 0,
   }).select()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
@@ -70,6 +71,7 @@ async function updateProduct(c: Context) {
     description: body.description,
     price: body.price,
     images: body.images,
+    quantity: body.quantity ?? 0,
   }).eq('id', id).select()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
@@ -140,6 +142,8 @@ async function createOrder(c: Context) {
   })
   if (errors.length) return c.json({ error: errors.join('; ') }, 400)
 
+  const totalPrice = body.total_price ?? body.price * (body.quantity ?? 1)
+
   const { error } = await supabaseAdmin.from('orders').insert({
     product_id: body.product_id,
     product_title: body.product_title,
@@ -149,6 +153,7 @@ async function createOrder(c: Context) {
     phone: body.phone,
     address: body.address,
     quantity: body.quantity,
+    total_price: totalPrice,
     status: 'new',
   })
   if (error) return c.json({ error: error.message }, 500)
@@ -157,12 +162,12 @@ async function createOrder(c: Context) {
     const caption = `🆕 NEW ORDER
 
 ${body.product_title}
-${body.price} UZS
+${body.price} UZS × ${body.quantity ?? 1} = ${totalPrice} UZS
 
 👤 ${body.customer_name}
 📞 ${body.phone}
 📍 ${body.address}
-${body.quantity ? `🔢 ${body.quantity} x` : ''}`
+🔢 ${body.quantity ?? 1} dona`
 
     if (body.product_image) {
       await sendTelegramPhoto(body.product_image, caption)

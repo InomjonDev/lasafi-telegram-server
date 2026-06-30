@@ -8,18 +8,21 @@ export async function sendTelegramNotification(
   address: string,
   quantity?: number,
   productImage?: string,
+  totalPrice?: number,
 ) {
+  const qty = quantity ?? 1
+  const total = totalPrice ?? price * qty
   const caption = [
     '🆕 NEW ORDER',
     '',
     `${productTitle}`,
-    `${price} UZS`,
+    `${price} UZS × ${qty} = ${total} UZS`,
     '',
     `👤 ${customerName}`,
     `📞 ${phone}`,
     `📍 ${address}`,
-    quantity ? `🔢 ${quantity} x` : '',
-  ].filter(Boolean).join('\n')
+    `🔢 ${qty} dona`,
+  ].join('\n')
 
   const body: Record<string, string> = {
     chat_id: chatId,

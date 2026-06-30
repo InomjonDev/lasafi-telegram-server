@@ -57,6 +57,7 @@ async function createProduct(c: Context) {
     description: body.description,
     price: body.price,
     images: body.images,
+    quantity: body.quantity ?? 0,
   }).select()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
@@ -73,6 +74,7 @@ async function updateProduct(c: Context) {
     description: body.description,
     price: body.price,
     images: body.images,
+    quantity: body.quantity ?? 0,
   }).eq('id', id).select()
   if (error) return c.json({ error: error.message }, 500)
   return c.json(data)
@@ -157,6 +159,7 @@ async function createOrder(c: Context) {
       body.address,
       body.quantity,
       body.product_image,
+      body.total_price,
     )
   } catch (err) {
     console.error('TELEGRAM ERROR:', err)
